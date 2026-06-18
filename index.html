@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Holiday Checklist</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<style>
+  body { font-family: 'Nunito', -apple-system, BlinkMacSystemFont, sans-serif; background: #fef9f0; }
+  [contenteditable]:focus { outline: none; }
+  [contenteditable]:empty:before { content: attr(data-placeholder); color: #c0c0c0; pointer-events: none; }
+  .check-box { min-width: 20px; min-height: 20px; width: 20px; height: 20px; border: 1.5px solid #d1d5db; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.1s; flex-shrink: 0; }
+  .check-box:active { transform: scale(0.92); }
+  .state-1 { border-color: #f59e0b; background: #fffbeb; }
+  .state-2 { border-color: #10b981; background: #10b981; }
+  .slash { display: block; width: 12px; height: 12px; }
+  .drag-handle { display: inline-flex; align-items: center; line-height: 1; color: #d1d5db; padding: 0 1px; visibility: hidden; cursor: grab; }
+  .drag-handle:active { cursor: grabbing; }
+  .sortable-ghost { opacity: 0.4; }
+  .sortable-chosen { background: #fef3c7 !important; }
+  .section-row { background: #fff; border-radius: 12px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .item-row { background: #fff; border-radius: 8px; margin-bottom: 2px; }
+  @media (hover: hover) {
+    .section-header:hover > .drag-handle,
+    .item-row:hover > .drag-handle { visibility: visible; }
+  }
+  .add-btn { color: #9ca3af; font-size: 13px; cursor: pointer; padding: 5px 0; user-select: none; }
+  .add-btn:hover { color: #6b7280; }
+  .state-2-text { text-decoration: line-through; color: #9ca3af; }
+  .state-1-text { color: #92400e; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="max-w-lg mx-auto px-3 pt-8 pb-16">
+  <!-- Title -->
+  <h1 class="text-2xl font-extrabold text-gray-800 mb-1 px-1">🏖️ Holiday Checklist</h1>
+  <!-- Counters -->
+  <div class="flex gap-4 mb-5 px-1">
+    <div class="text-sm text-gray-400">
+      <span id="unchecked-count" class="font-bold text-gray-600">0</span> to pack
+    </div>
+    <div class="text-sm text-gray-400">
+      <span id="checked-count" class="font-bold text-amber-500">0</span> in progress
+    </div>
+  </div>
+
+  <!-- Main list -->
+  <div id="sections-container"></div>
+
+  <!-- Add section -->
+  <div class="add-btn pl-1 mt-2" id="add-section-btn" data-role="add-section" tabindex="0">+ Add section</div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let state = { sections: [] };
+
+function uid() { return crypto.randomUUID(); }
+
+function newSection(text = '') {
+  return { id: uid(), text, state: 0, items: [] };
+}
+
+function newItem(text = '') {
+  return { id: uid(), text, state: 0, previousState: 0 };
+}
+
+// ── Counters ───────────────────────────────────────────────────────────────
+function updateCounters() {
+  let unchecked = 0, checked = 0;
+  for (const s of state.sections) {
+    for (const it of s.items) {
+      if (it.state === 0) unchecked++;
+      else if (it.state === 1) checked++;
+    }
+  }
+  document.getElementById('unchecked-count').textContent = unchecked;
+  document.getElementById('checked-count').textContent = checked;
+}
+
+// ── Sorting helpers ────────────────────────────────────────────────────────
+function sortItems(section) {
+  const nonDouble = section.items.filter(i => i.state !== 2);
+  const double = section.items.filter(i => i.state === 2);
+  section.items = [...nonDouble, ...double];
+}
+
+function sortSections() {
+  const nonDouble = state.sections.filter(s => s.state !== 2);
+  const double = state.sections.filter(s => s.state === 2);
+  state.sections = [...nonDouble, ...double];
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
+let sectionSortable = null;
+const itemSortables = new Map();
+
+function render() {
+  updateCounters();
+  const container = document.getElementById('sections-container');
+
+  // Destroy old sortables
+  if (sectionSortable) sectionSortable.destroy();
+  itemSortables.forEach(s => s.destroy());
+  itemSortables.clear();
+
+  container.innerHTML = '';
+
+  for (const section of state.sections) {
+    const sDiv = document.createElement('div');
+    sDiv.className = 'section-row';
+    sDiv.dataset.id = section.id;
+
+    // Section header
+    const sHeader = document.createElement('div');
+    sHeader.className = 'section-header flex items-center gap-2 px-3 py-2.5';
+
+    const sDragHandle = document.createElement('span');
+    sDragHandle.className = 'drag-handle section-drag text-lg select-none';
+    sDragHandle.innerHTML = '⠿';
+    sDragHandle.dataset.role = 'section-drag';
+
+    const sCheck = document.createElement('div');
+    sCheck.className = 'check-box section-check' + (section.state === 2 ? ' state-2' : '');
+    sCheck.dataset.role = 'section-check';
+    sCheck.dataset.id = section.id;
+    if (section.state === 2) sCheck.innerHTML = crossSVG();
+
+    const sText = document.createElement('div');
+    sText.className = 'flex-1 font-semibold text-base contenteditable-section' +
+      (section.state === 2 ? ' state-2-text' : '');
+    sText.contentEditable = 'true';
+    sText.dataset.role = 'section-text';
+    sText.dataset.id = section.id;
+    sText.dataset.placeholder = 'Section name';
+    sText.textContent = section.text;
+
+    sHeader.appendChild(sDragHandle);
+    sHeader.appendChild(sCheck);
+    sHeader.appendChild(sText);
+    sDiv.appendChild(sHeader);
+
+    // Items container
+    const itemsDiv = document.createElement('div');
+    itemsDiv.className = 'items-container pl-5 pr-3 pt-0.5 pb-2.5';
+    itemsDiv.dataset.sectionId = section.id;
+
+    for (const item of section.items) {
+      itemsDiv.appendChild(renderItem(item, section.id));
+    }
+
+    // Add item btn
+    const addItemBtn = document.createElement('div');
+    addItemBtn.className = 'add-btn pl-9 py-1';
+    addItemBtn.textContent = '+ Add item';
+    addItemBtn.dataset.role = 'add-item';
+    addItemBtn.dataset.sectionId = section.id;
+    addItemBtn.tabIndex = 0;
+
+    itemsDiv.appendChild(addItemBtn);
+    sDiv.appendChild(itemsDiv);
+    container.appendChild(sDiv);
+
+    // Init item sortable
+    const iSortable = Sortable.create(itemsDiv, {
+      group: 'items',
+      handle: '.item-check, .item-drag',
+      animation: 80,
+      ghostClass: 'sortable-ghost',
+      chosenClass: 'sortable-chosen',
+      draggable: '.item-row',
+      onEnd(evt) {
+        const itemId = evt.item.dataset.id;
+        const fromSecId = evt.from.dataset.sectionId;
+        const toSecId = evt.to.dataset.sectionId;
+        const fromSec = state.sections.find(s => s.id === fromSecId);
+        const toSec = state.sections.find(s => s.id === toSecId);
+        if (!fromSec || !toSec) return;
+        const itemIdx = fromSec.items.findIndex(i => i.id === itemId);
+        if (itemIdx === -1) return;
+        const [item] = fromSec.items.splice(itemIdx, 1);
+        // Determine new index among item-rows only
+        const allRows = [...evt.to.querySelectorAll('.item-row')];
+        const newIdx = allRows.indexOf(evt.item);
+        toSec.items.splice(newIdx < 0 ? toSec.items.length : newIdx, 0, item);
+        render();
+      }
+    });
+    itemSortables.set(section.id, iSortable);
+  }
+
+  // Init section sortable
+  sectionSortable = Sortable.create(container, {
+    handle: '.section-check, .section-drag',
+    animation: 100,
+    ghostClass: 'sortable-ghost',
+    chosenClass: 'sortable-chosen',
+    draggable: '.section-row',
+    onEnd(evt) {
+      const secId = evt.item.dataset.id;
+      const oldIdx = state.sections.findIndex(s => s.id === secId);
+      if (oldIdx === -1) return;
+      const [sec] = state.sections.splice(oldIdx, 1);
+      const allSecRows = [...container.querySelectorAll('.section-row')];
+      const newIdx = allSecRows.indexOf(evt.item);
+      state.sections.splice(newIdx < 0 ? state.sections.length : newIdx, 0, sec);
+      render();
+    }
+  });
+}
+
+function renderItem(item, sectionId) {
+  const div = document.createElement('div');
+  div.className = 'item-row flex items-center gap-2 px-2 py-1.5';
+  div.dataset.id = item.id;
+
+  const dragHandle = document.createElement('span');
+  dragHandle.className = 'drag-handle item-drag text-base select-none';
+  dragHandle.innerHTML = '⠿';
+
+  const check = document.createElement('div');
+  check.className = 'check-box item-check' +
+    (item.state === 1 ? ' state-1' : '') +
+    (item.state === 2 ? ' state-2' : '');
+  check.dataset.role = 'item-check';
+  check.dataset.id = item.id;
+  check.dataset.sectionId = sectionId;
+  if (item.state === 1) check.innerHTML = slashSVG();
+  if (item.state === 2) check.innerHTML = crossSVG();
+
+  const text = document.createElement('div');
+  text.className = 'flex-1 text-sm' +
+    (item.state === 2 ? ' state-2-text' : '') +
+    (item.state === 1 ? ' state-1-text' : '');
+  text.contentEditable = 'true';
+  text.dataset.role = 'item-text';
+  text.dataset.id = item.id;
+  text.dataset.sectionId = sectionId;
+  text.dataset.placeholder = 'Item';
+  text.textContent = item.text;
+
+  div.appendChild(dragHandle);
+  div.appendChild(check);
+  div.appendChild(text);
+  return div;
+}
+
+function slashSVG() {
+  return `<svg class="slash" viewBox="0 0 16 16" fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-linecap="round"><line x1="4" y1="12" x2="12" y2="4"/></svg>`;
+}
+
+function crossSVG() {
+  return `<svg class="slash" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/></svg>`;
+}
+
+// ── Event delegation ───────────────────────────────────────────────────────
+document.addEventListener('click', e => {
+  const target = e.target;
+
+  // Section check
+  const sCheck = target.closest('[data-role="section-check"]');
+  if (sCheck) {
+    const sec = state.sections.find(s => s.id === sCheck.dataset.id);
+    if (!sec) return;
+    if (sec.state === 0) {
+      sec.items.forEach(it => { it.previousState = it.state; it.state = 2; });
+      sec.state = 2;
+      // Move section to bottom of non-double, or top of double
+      const idx = state.sections.indexOf(sec);
+      state.sections.splice(idx, 1);
+      const firstDouble = state.sections.findIndex(s => s.state === 2);
+      state.sections.splice(firstDouble === -1 ? state.sections.length : firstDouble, 0, sec);
+    } else {
+      sec.items.forEach(it => { it.state = it.previousState; });
+      sec.state = 0;
+    }
+    render();
+    return;
+  }
+
+  // Item check
+  const iCheck = target.closest('[data-role="item-check"]');
+  if (iCheck) {
+    const sec = state.sections.find(s => s.id === iCheck.dataset.sectionId);
+    if (!sec) return;
+    const item = sec.items.find(i => i.id === iCheck.dataset.id);
+    if (!item) return;
+    item.state = (item.state + 1) % 3;
+    if (item.state === 2) {
+      const idx = sec.items.indexOf(item);
+      sec.items.splice(idx, 1);
+      const firstDouble = sec.items.findIndex(i => i.state === 2);
+      sec.items.splice(firstDouble === -1 ? sec.items.length : firstDouble, 0, item);
+    }
+    render();
+    // Refocus the text element of this item
+    const el = document.querySelector(`[data-role="item-text"][data-id="${item.id}"]`);
+    if (el) el.focus();
+    return;
+  }
+
+  // Add section
+  if (target.id === 'add-section-btn') {
+    const sec = newSection();
+    state.sections.push(sec);
+    render();
+    const el = document.querySelector(`[data-role="section-text"][data-id="${sec.id}"]`);
+    if (el) { el.focus(); placeCaret(el, 0); }
+    return;
+  }
+
+  // Add item
+  const addItem = target.closest('[data-role="add-item"]');
+  if (addItem) {
+    const sec = state.sections.find(s => s.id === addItem.dataset.sectionId);
+    if (!sec) return;
+    const item = newItem();
+    sec.items.push(item);
+    render();
+    const el = document.querySelector(`[data-role="item-text"][data-id="${item.id}"]`);
+    if (el) { el.focus(); placeCaret(el, 0); }
+    return;
+  }
+});
+
+// ── contenteditable input ──────────────────────────────────────────────────
+document.addEventListener('input', e => {
+  const role = e.target.dataset.role;
+  if (role === 'section-text') {
+    const sec = state.sections.find(s => s.id === e.target.dataset.id);
+    if (sec) sec.text = e.target.textContent;
+    updateCounters();
+  } else if (role === 'item-text') {
+    const sec = state.sections.find(s => s.id === e.target.dataset.sectionId);
+    if (sec) {
+      const item = sec.items.find(i => i.id === e.target.dataset.id);
+      if (item) item.text = e.target.textContent;
+    }
+    updateCounters();
+  }
+});
+
+document.addEventListener('keydown', e => {
+  const role = e.target.dataset.role;
+
+  // Ctrl/Cmd+Enter → toggle checkbox; must come first to prevent Enter handlers below from firing
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    if (role === 'section-text') {
+      const sec = state.sections.find(s => s.id === e.target.dataset.id);
+      if (sec) document.querySelector(`[data-role="section-check"][data-id="${sec.id}"]`)?.click();
+    } else if (role === 'item-text') {
+      document.querySelector(`[data-role="item-check"][data-id="${e.target.dataset.id}"]`)?.click();
+    }
+    return;
+  }
+
+  // Enter/Space on add buttons
+  if ((e.key === 'Enter' || e.key === ' ') && (role === 'add-item' || role === 'add-section')) {
+    e.preventDefault();
+    e.target.click();
+    return;
+  }
+
+  if (role === 'section-text') {
+    const sec = state.sections.find(s => s.id === e.target.dataset.id);
+    if (!sec) return;
+
+    // Space or Tab at caret 0 → convert to item in preceding section
+    if ((e.key === ' ' && getCaretOffset(e.target) === 0) || e.key === 'Tab') {
+      e.preventDefault();
+      const secIdx = state.sections.indexOf(sec);
+      const prevSec = secIdx > 0 ? state.sections[secIdx - 1] : null;
+      const targetSec = prevSec || sec; // if no prev, just add to current... or create one
+      const item = newItem(sec.text);
+      if (prevSec) {
+        state.sections.splice(secIdx, 1);
+        prevSec.items.push(item);
+      } else {
+        // No previous section: create a wrapper section
+        const wrapper = newSection('');
+        wrapper.items.push(item);
+        state.sections.splice(0, 0, wrapper);
+        state.sections.splice(state.sections.indexOf(sec), 1);
+      }
+      render();
+      const el = document.querySelector(`[data-role="item-text"][data-id="${item.id}"]`);
+      if (el) { el.focus(); placeCaret(el, item.text.length); }
+      return;
+    }
+
+    // Backspace on empty → delete section
+    if (e.key === 'Backspace' && e.target.textContent === '') {
+      e.preventDefault();
+      const secIdx = state.sections.indexOf(sec);
+      state.sections.splice(secIdx, 1);
+      render();
+      focusPrev(secIdx, null);
+      return;
+    }
+
+    // Enter → add new item
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const item = newItem();
+      sec.items.unshift(item);
+      render();
+      const el = document.querySelector(`[data-role="item-text"][data-id="${item.id}"]`);
+      if (el) { el.focus(); placeCaret(el, 0); }
+    }
+  }
+
+  if (role === 'item-text') {
+    const sec = state.sections.find(s => s.id === e.target.dataset.sectionId);
+    if (!sec) return;
+    const item = sec.items.find(i => i.id === e.target.dataset.id);
+    if (!item) return;
+
+    // Backspace at 0 or Shift+Tab → convert to section
+    if ((e.key === 'Backspace' && getCaretOffset(e.target) === 0) ||
+        (e.key === 'Tab' && e.shiftKey)) {
+      e.preventDefault();
+      if (e.target.textContent === '' && e.key === 'Backspace') {
+        // Delete item
+        const itemIdx = sec.items.indexOf(item);
+        sec.items.splice(itemIdx, 1);
+        render();
+        focusPrevItem(sec, itemIdx);
+        return;
+      }
+      // Convert item to section
+      const newSec = newSection(item.text);
+      const secIdx = state.sections.indexOf(sec);
+      const itemIdx = sec.items.indexOf(item);
+      sec.items.splice(itemIdx, 1);
+      state.sections.splice(secIdx + 1, 0, newSec);
+      render();
+      const el = document.querySelector(`[data-role="section-text"][data-id="${newSec.id}"]`);
+      if (el) { el.focus(); placeCaret(el, item.text.length); }
+      return;
+    }
+
+    // Enter → add new item below
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const newIt = newItem();
+      const itemIdx = sec.items.indexOf(item);
+      sec.items.splice(itemIdx + 1, 0, newIt);
+      render();
+      const el = document.querySelector(`[data-role="item-text"][data-id="${newIt.id}"]`);
+      if (el) { el.focus(); placeCaret(el, 0); }
+    }
+  }
+
+  // Arrow key navigation (ArrowUp / ArrowDown)
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    const editables = getFocusableEditables();
+    const idx = editables.indexOf(e.target);
+    if (idx === -1) return;
+    const next = e.key === 'ArrowDown' ? editables[idx + 1] : editables[idx - 1];
+    if (next) { e.preventDefault(); next.focus(); placeCaret(next, 0); }
+  }
+});
+
+function getFocusableEditables() {
+  return [...document.querySelectorAll(
+    '[data-role="section-text"], [data-role="item-text"], [data-role="add-item"], [data-role="add-section"]'
+  )];
+}
+
+// ── Caret helpers ──────────────────────────────────────────────────────────
+function getCaretOffset(el) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return 0;
+  const range = sel.getRangeAt(0);
+  const preRange = range.cloneRange();
+  preRange.selectNodeContents(el);
+  preRange.setEnd(range.startContainer, range.startOffset);
+  return preRange.toString().length;
+}
+
+function placeCaret(el, offset) {
+  el.focus();
+  const range = document.createRange();
+  const sel = window.getSelection();
+  const textNode = el.firstChild;
+  if (textNode && textNode.nodeType === Node.TEXT_NODE) {
+    const pos = Math.min(offset, textNode.length);
+    range.setStart(textNode, pos);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+}
+
+function focusPrev(secIdx, itemIdx) {
+  // Try to focus the last element of the previous section or the section itself
+  const prevSec = state.sections[secIdx - 1];
+  if (!prevSec) return;
+  if (prevSec.items.length > 0) {
+    const lastItem = prevSec.items[prevSec.items.length - 1];
+    const el = document.querySelector(`[data-role="item-text"][data-id="${lastItem.id}"]`);
+    if (el) { el.focus(); placeCaret(el, lastItem.text.length); }
+  } else {
+    const el = document.querySelector(`[data-role="section-text"][data-id="${prevSec.id}"]`);
+    if (el) { el.focus(); placeCaret(el, prevSec.text.length); }
+  }
+}
+
+function focusPrevItem(sec, itemIdx) {
+  if (itemIdx > 0) {
+    const prevItem = sec.items[itemIdx - 1];
+    const el = document.querySelector(`[data-role="item-text"][data-id="${prevItem.id}"]`);
+    if (el) { el.focus(); placeCaret(el, prevItem.text.length); }
+  } else {
+    const secIdx = state.sections.indexOf(sec);
+    focusPrev(secIdx + 1, null);
+    const el = document.querySelector(`[data-role="section-text"][data-id="${sec.id}"]`);
+    if (el) { el.focus(); placeCaret(el, sec.text.length); }
+  }
+}
+
+// ── Default list (edit this to customise the starting data) ───────────────
+const DEFAULT_LIST = [
+  { section: 'Packing', items: ['Passport', 'Chargers', 'Adaptor', 'Sunscreen'] },
+  { section: 'Clothes', items: ['T-shirts', 'Shorts', 'Swimwear', 'Sandals', 'Light jacket'] },
+  { section: 'Toiletries', items: ['Toothbrush', 'Shampoo', 'Deodorant', 'Razor'] },
+  { section: 'Travel docs', items: ['Tickets', 'Hotel booking', 'Travel insurance', 'EHIC / health card'] },
+  { section: 'Money', items: ['Cash (local currency)', 'Notify bank', 'Travel card'] },
+  { section: 'Tech', items: ['Phone', 'Headphones', 'Power bank', 'Camera'] },
+  { section: 'Health', items: ['Medication', 'First aid kit', 'Mosquito repellent'] },
+  { section: 'Home before leaving', items: ['Lock doors', 'Unplug appliances', 'Water plants', 'Set alarm'] },
+  { section: 'Entertainment', items: ['Books / e-reader', 'Downloaded podcasts', 'Travel games'] },
+];
+
+// ── Init ───────────────────────────────────────────────────────────────────
+state.sections = DEFAULT_LIST.map(({ section, items }) => {
+  const s = newSection(section);
+  s.items = items.map(text => newItem(text));
+  return s;
+});
+render();
+</script>
+</body>
+</html>
