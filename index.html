@@ -21,7 +21,7 @@
   .drag-handle:active { cursor: grabbing; }
   .sortable-ghost { opacity: 0.4; }
   .sortable-chosen { background: #fef3c7 !important; }
-  .section-row { background: #fff; border-radius: 12px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .section-row { background: #fff; border-radius: 12px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
   .item-row { background: #fff; border-radius: 8px; margin-bottom: 2px; }
   @media (hover: hover) {
     .section-header:hover > .drag-handle,
@@ -117,7 +117,7 @@ function render() {
 
     // Section header
     const sHeader = document.createElement('div');
-    sHeader.className = 'section-header flex items-center gap-2 px-3 py-2.5';
+    sHeader.className = 'section-header flex items-center gap-2 px-3 py-2';
 
     const sDragHandle = document.createElement('span');
     sDragHandle.className = 'drag-handle section-drag text-lg select-none';
@@ -146,7 +146,7 @@ function render() {
 
     // Items container
     const itemsDiv = document.createElement('div');
-    itemsDiv.className = 'items-container pl-5 pr-3 pt-0.5 pb-2.5';
+    itemsDiv.className = 'items-container pl-5 pr-3 pt-0.5 pb-2';
     itemsDiv.dataset.sectionId = section.id;
 
     for (const item of section.items) {
@@ -215,7 +215,7 @@ function render() {
 
 function renderItem(item, sectionId) {
   const div = document.createElement('div');
-  div.className = 'item-row flex items-center gap-2 px-2 py-1.5';
+  div.className = 'item-row flex items-center gap-2 px-2 py-1';
   div.dataset.id = item.id;
 
   const dragHandle = document.createElement('span');
@@ -297,9 +297,6 @@ document.addEventListener('click', e => {
       sec.items.splice(firstDouble === -1 ? sec.items.length : firstDouble, 0, item);
     }
     render();
-    // Refocus the text element of this item
-    const el = document.querySelector(`[data-role="item-text"][data-id="${item.id}"]`);
-    if (el) el.focus();
     return;
   }
 
